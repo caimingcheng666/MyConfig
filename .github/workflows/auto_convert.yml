@@ -24,22 +24,26 @@ jobs:
         env:
           AIRPORT_URL: ${{ secrets.AIRPORT_URL }}
         run: |
-          # 1. 强制赋予转换工具可执行权限
-          chmod +x ./subconverter/subconverter
+          # 1. 必须先进入子目录，确保 subconverter 能够正确读取当前目录下的 pref.ini 配置文件，防止闪退
+          cd subconverter
+          chmod +x subconverter
+          ./subconverter -g &
           
-          # 2. 在后台启动转换服务
-          ./subconverter/subconverter -g &
+          # 2. 给它 5 秒钟的充足启动时间
           sleep 5
           
-          # 3. 使用 Python 安全读取环境变量并进行 URL 编码，防止特殊符号断流
+          # 3. 启动成功后，切回仓库根目录，准备接收生成的配置文件
+          cd ..
+          
+          # 4. 使用 Python 安全读取环境变量并进行 URL 编码
           ENCODED_URL=$(python3 -c "import os, urllib.parse; print(urllib.parse.quote(os.environ['AIRPORT_URL']))")
           
-          # 4. 请求本地转换服务，套用经典的 ACL4SSR 规则
+          # 5. 请求本地已成功驻留后台的 25500 服务
           curl -L "http://127.0.0.1:25500/sub?target=clash&url=${ENCODED_URL}&config=https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini" -o config.yaml
 
-          # 5. 严格验证生成的文件
+          # 6. 严格验证生成的文件
           if [ ! -s config.yaml ] || grep -q "Invalid" config.yaml; then
-            echo "❌ 错误：转换失败！请检查你的 GitHub Secrets 里的 AIRPORT_URL 是否填写正确，或者链接是否有效。"
+            echo "❌ 错误：转换失败！请检查你的 GitHub Secrets 里的 AIRPORT_URL 是否填写正确。"
             exit 1
           fi
 
