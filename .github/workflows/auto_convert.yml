@@ -21,15 +21,25 @@ jobs:
           tar -xvf subconverter_linux64.tar.gz
 
       - name: 启动本地转换服务并生成配置
+        env:
+          AIRPORT_URL: ${{ secrets.AIRPORT_URL }}
         run: |
+          # 1. 强制赋予转换工具可执行权限
+          chmod +x ./subconverter/subconverter
+          
+          # 2. 在后台启动转换服务
           ./subconverter/subconverter -g &
-          sleep 3
-          # 使用 GitHub 虚拟机本地跑的转换器，安全抓取加密的机场链接，并套用官方 ACL4SSR 规则
-          curl -L "http://127.0.0.1:25500/sub?target=clash&url=${{ secrets.AIRPORT_URL }}&config=https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini" -o config.yaml
+          sleep 5
+          
+          # 3. 使用 Python 安全读取环境变量并进行 URL 编码，防止特殊符号断流
+          ENCODED_URL=$(python3 -c "import os, urllib.parse; print(urllib.parse.quote(os.environ['AIRPORT_URL']))")
+          
+          # 4. 请求本地转换服务，套用经典的 ACL4SSR 规则
+          curl -L "http://127.0.0.1:25500/sub?target=clash&url=${ENCODED_URL}&config=https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini" -o config.yaml
 
-          # 验证生成的文件是否有效
+          # 5. 严格验证生成的文件
           if [ ! -s config.yaml ] || grep -q "Invalid" config.yaml; then
-            echo "转换失败，文件为空或无效！"
+            echo "❌ 错误：转换失败！请检查你的 GitHub Secrets 里的 AIRPORT_URL 是否填写正确，或者链接是否有效。"
             exit 1
           fi
 
@@ -38,5 +48,11 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add config.yaml
-          git commit -m "自动同步最新机场节点" || exit 0
-          git push
+          
+          # 只有在文件内容有真正变动时才提交，防止空提交报错
+          if git diff --staged --quiet; then
+            echo "✅ 配置未发生变化，无需重复提交。"
+          else
+            git commit -m "自动同步最新机场节点"
+            git push
+          fi
