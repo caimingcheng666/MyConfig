@@ -1,0 +1,42 @@
+name: Auto Convert Clash Config
+
+on:
+  schedule:
+    - cron: '0 */12 * * *' # 每 12 小时自动在后台更新一次节点
+  workflow_dispatch: # 允许你随时在网页上点击按钮手动触发更新
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载并解压本地转换工具
+        run: |
+          wget https://github.com/tindy2013/subconverter/releases/latest/download/subconverter_linux64.tar.gz
+          tar -xvf subconverter_linux64.tar.gz
+
+      - name: 启动本地转换服务并生成配置
+        run: |
+          ./subconverter/subconverter -g &
+          sleep 3
+          # 使用 GitHub 虚拟机本地跑的转换器，安全抓取加密的机场链接，并套用官方 ACL4SSR 规则
+          curl -L "http://127.0.0.1:25500/sub?target=clash&url=${{ secrets.AIRPORT_URL }}&config=https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini" -o config.yaml
+
+          # 验证生成的文件是否有效
+          if [ ! -s config.yaml ] || grep -q "Invalid" config.yaml; then
+            echo "转换失败，文件为空或无效！"
+            exit 1
+          fi
+
+      - name: 将生成的固定的配置文件推送到仓库
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add config.yaml
+          git commit -m "自动同步最新机场节点" || exit 0
+          git push
