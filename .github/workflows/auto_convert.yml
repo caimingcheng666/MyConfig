@@ -1,62 +1,31 @@
-name: Auto Convert Clash Config
+name: Update Clash Config
 
 on:
   schedule:
-    - cron: '0 */12 * * *' # 每 12 小时自动在后台更新一次节点
-  workflow_dispatch: # 允许你随时在网页上点击按钮手动触发更新
-
-permissions:
-  contents: write
+    # 每天北京时间 0点 和 12点 自动更新（UTC 时间 16点 和 4点）
+    - cron: '0 4,16 * * *'
+  workflow_dispatch: # 允许手动点击按钮触发更新
 
 jobs:
-  convert:
+  update:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: 下载并解压本地转换工具
-        run: |
-          wget https://github.com/tindy2013/subconverter/releases/latest/download/subconverter_linux64.tar.gz
-          tar -xvf subconverter_linux64.tar.gz
+    - name: Download and Convert Subscription
+      run: |
+        # 使用公共订阅转换 API，你也可以换成自己信任的后端 API
+        # 这里默认加入了远程配置规则（ACL4SSR_Online），可根据需求修改 config 参数
+        API_URL="https://api.w03.cc/sub?target=clash&config=https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online.ini&url=${{ secrets.SUB_URL }}"
+        
+        # 下载并保存为 clash.yaml
+        curl -L "$API_URL" -o clash.yaml
 
-      - name: 启动本地转换服务并生成配置
-        env:
-          AIRPORT_URL: ${{ secrets.AIRPORT_URL }}
-        run: |
-          # 1. 必须先进入子目录，确保 subconverter 能够正确读取当前目录下的 pref.ini 配置文件，防止闪退
-          cd subconverter
-          chmod +x subconverter
-          ./subconverter -g &
-          
-          # 2. 给它 5 秒钟的充足启动时间
-          sleep 5
-          
-          # 3. 启动成功后，切回仓库根目录，准备接收生成的配置文件
-          cd ..
-          
-          # 4. 使用 Python 安全读取环境变量并进行 URL 编码
-          ENCODED_URL=$(python3 -c "import os, urllib.parse; print(urllib.parse.quote(os.environ['AIRPORT_URL']))")
-          
-          # 5. 请求本地已成功驻留后台的 25500 服务
-          curl -L "http://127.0.0.1:25500/sub?target=clash&url=${ENCODED_URL}&config=https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini" -o config.yaml
-
-          # 6. 严格验证生成的文件
-          if [ ! -s config.yaml ] || grep -q "Invalid" config.yaml; then
-            echo "❌ 错误：转换失败！请检查你的 GitHub Secrets 里的 AIRPORT_URL 是否填写正确。"
-            exit 1
-          fi
-
-      - name: 将生成的固定的配置文件推送到仓库
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add config.yaml
-          
-          # 只有在文件内容有真正变动时才提交，防止空提交报错
-          if git diff --staged --quiet; then
-            echo "✅ 配置未发生变化，无需重复提交。"
-          else
-            git commit -m "自动同步最新机场节点"
-            git push
-          fi
+    - name: Commit and Push
+      run: |
+        git config --local user.email "actions@github.com"
+        git config --local user.name "GitHub Actions"
+        git add clash.yaml
+        # 只有在文件有变动时才提交，防止报错
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update clash.yaml $(date)" && git push)
